@@ -1,0 +1,869 @@
+#include "SmearEvent.h"
+
+SmearEvent::SmearEvent(bool isRead, string fileName) {
+  if (!isRead) {
+    file_event = new TFile(fileName.c_str(), "recreate");
+    tree_event = new TTree("Event", "Event");
+
+    tree_event->Branch("num_final_particles", &num_final_particles,
+                       "num_final_particles/I");
+    tree_event->Branch("true_px", true_px, "true_px[num_final_particles]/D");
+    tree_event->Branch("true_py", true_py, "true_py[num_final_particles]/D");
+    tree_event->Branch("true_pz", true_pz, "true_pz[num_final_particles]/D");
+    tree_event->Branch("smeared_px", smeared_px,
+                       "smeared_px[num_final_particles]/D");
+    tree_event->Branch("smeared_py", smeared_py,
+                       "smeared_py[num_final_particles]/D");
+    tree_event->Branch("smeared_pz", smeared_pz,
+                       "smeared_pz[num_final_particles]/D");
+    tree_event->Branch("true_pid", true_pid, "true_pid[num_final_particles]/I");
+    tree_event->Branch("smeared_dcaxy", smeared_dcaxy,
+                       "smeared_dcaxy[num_final_particles]/D");
+    tree_event->Branch("smeared_dcaz", smeared_dcaz,
+                       "smeared_dcaz[num_final_particles]/D");
+    tree_event->Branch("n_sigma_pid_ecce", &n_sigma_pid_ecce[0][0][0],
+                       "n_sigma_pid_ecce[num_final_particles][4][3]/D");
+    tree_event->Branch("n_sigma_pid_eicc", &n_sigma_pid_eicc[0][0][0],
+                       "n_sigma_pid_eicc[num_final_particles][4][3]/D");
+    tree_event->Branch("smeared_px_scattered_lepton",
+                       &smeared_px_scattered_lepton,
+                       "smeared_px_scattered_lepton/D");
+    tree_event->Branch("smeared_py_scattered_lepton",
+                       &smeared_py_scattered_lepton,
+                       "smeared_py_scattered_lepton/D");
+    tree_event->Branch("smeared_pz_scattered_lepton",
+                       &smeared_pz_scattered_lepton,
+                       "smeared_pz_scattered_lepton/D");
+    tree_event->Branch("true_px_scattered_lepton", &true_px_scattered_lepton,
+                       "true_px_scattered_lepton/D");
+    tree_event->Branch("true_py_scattered_lepton", &true_py_scattered_lepton,
+                       "true_py_scattered_lepton/D");
+    tree_event->Branch("true_pz_scattered_lepton", &true_pz_scattered_lepton,
+                       "true_pz_scattered_lepton/D");
+    tree_event->Branch("prime_vx", &prime_vx, "prime_vx/D");
+    tree_event->Branch("prime_vy", &prime_vy, "prime_vy/D");
+    tree_event->Branch("prime_vz", &prime_vz, "prime_vz/D");
+    tree_event->Branch("int_is_scattered_electron_detected",
+                       &int_is_scattered_electron_detected,
+                       "int_is_scattered_electron_detected/I");
+  } else {
+    file_event = new TFile(fileName.c_str());
+    tree_event = (TTree *)file_event->Get("Event");
+
+    tree_event->SetBranchAddress("num_final_particles", &num_final_particles);
+    tree_event->SetBranchAddress("true_px", true_px);
+    tree_event->SetBranchAddress("true_py", true_py);
+    tree_event->SetBranchAddress("true_pz", true_pz);
+    tree_event->SetBranchAddress("smeared_px", smeared_px);
+    tree_event->SetBranchAddress("smeared_py", smeared_py);
+    tree_event->SetBranchAddress("smeared_pz", smeared_pz);
+    tree_event->SetBranchAddress("true_pid", true_pid);
+    tree_event->SetBranchAddress("smeared_dcaxy", smeared_dcaxy);
+    tree_event->SetBranchAddress("smeared_dcaz", smeared_dcaz);
+    tree_event->SetBranchAddress("n_sigma_pid_ecce",
+                                 &n_sigma_pid_ecce[0][0][0]);
+    tree_event->SetBranchAddress("n_sigma_pid_eicc",
+                                 &n_sigma_pid_eicc[0][0][0]);
+
+    tree_event->SetBranchAddress("smeared_px_scattered_lepton",
+                                 &smeared_px_scattered_lepton);
+    tree_event->SetBranchAddress("smeared_py_scattered_lepton",
+                                 &smeared_py_scattered_lepton);
+    tree_event->SetBranchAddress("smeared_pz_scattered_lepton",
+                                 &smeared_pz_scattered_lepton);
+    tree_event->SetBranchAddress("true_px_scattered_lepton",
+                                 &true_px_scattered_lepton);
+    tree_event->SetBranchAddress("true_py_scattered_lepton",
+                                 &true_py_scattered_lepton);
+    tree_event->SetBranchAddress("true_pz_scattered_lepton",
+                                 &true_pz_scattered_lepton);
+    tree_event->SetBranchAddress("prime_vx", &prime_vx);
+    tree_event->SetBranchAddress("prime_vy", &prime_vy);
+    tree_event->SetBranchAddress("prime_vz", &prime_vz);
+    tree_event->SetBranchAddress("int_is_scattered_electron_detected",
+                                 &int_is_scattered_electron_detected);
+  }
+}
+
+SmearEvent::~SmearEvent() {}
+
+SmearEvent::SmearParticleStr
+SmearEvent::SmearFunction(const erhic::ParticleMC *mcParticle) {
+  SmearEvent::SmearParticleStr tempStr;
+  double eff;
+  TLorentzVector p4McParticle = mcParticle->Get4Vector();
+  TVector3 p3McParticle = p4McParticle.Vect();
+  TVector3 v3McParticle = mcParticle->GetVertex();
+  tempStr.p_mc = p3McParticle;
+  tempStr.pid = (int)mcParticle->id;
+
+  if (p3McParticle.Eta() > 3.5 || p3McParticle.Eta() < -3.5) {
+    tempStr.isDetected = false;
+    return tempStr;
+  }
+
+  PidMap::PID true_pid;
+  int mvd_pid = 0;
+  if (abs(tempStr.pid) == 211) {
+    true_pid = PidMap::PID::pion;
+    mvd_pid = 2;
+  } else if (abs(tempStr.pid) == 2212) {
+    true_pid = PidMap::PID::proton;
+    mvd_pid = 4;
+  } else if (abs(tempStr.pid) == 321) {
+    true_pid = PidMap::PID::kaon;
+    mvd_pid = 3;
+  } else if (abs(tempStr.pid) == 11) {
+    true_pid = PidMap::PID::electron;
+    mvd_pid = 0;
+  }
+
+  eff = mvd_dp.GetEff(p3McParticle.Perp(), p3McParticle.PseudoRapidity(),
+                      mvd_pid);
+
+  double temp_rnd = MRndgen_eff.Uniform(0, 1);
+
+  if (temp_rnd > eff) {
+    tempStr.isDetected = false;
+    return tempStr;
+  } else {
+    tempStr.isDetected = true;
+  }
+
+  PidMap pidmap(true_pid, p3McParticle.PseudoRapidity(), p3McParticle.Mag());
+
+  double pidmap_temp[n_particle_type][n_det_type];
+
+  pidmap.GetPidMap(PidMap::ECCE_PID, &pidmap_temp[0][0]);
+
+  for (int iParticleType = 0; iParticleType < n_particle_type;
+       iParticleType++) {
+    for (int iDetType = 0; iDetType < n_particle_type; iDetType++) {
+      tempStr.n_sigma_pid_ecce[iParticleType][iDetType] =
+          pidmap_temp[iParticleType][iDetType];
+    }
+  }
+
+  pidmap.GetPidMap(PidMap::EICC_ACCEPTANCE, &pidmap_temp[0][0]);
+
+  for (int iParticleType = 0; iParticleType < n_particle_type;
+       iParticleType++) {
+    for (int iDetType = 0; iDetType < n_particle_type; iDetType++) {
+      tempStr.n_sigma_pid_eicc[iParticleType][iDetType] =
+          pidmap_temp[iParticleType][iDetType];
+    }
+  }
+
+  dca_smear(p3McParticle.X(), p3McParticle.Y(), p3McParticle.Z(),
+            v3McParticle.X(), v3McParticle.Y(), v3McParticle.Z(), mvd_pid,
+            &(tempStr.smeared_dcaz), &(tempStr.smeared_dcaxy), &rndgenXY,
+            &rndgenZ);
+  p_smear(&p3McParticle, &rndgenP, mvd_pid);
+  tempStr.p_smeared = p3McParticle;
+  return tempStr;
+}
+
+SmearEvent::SmearParticleStr SmearEvent::SmearFunction(TVector3 p3McParticle,
+                                                       TVector3 v3McParticle,
+                                                       int pid) {
+  SmearEvent::SmearParticleStr tempStr;
+  double eff;
+  TVector3 p3smeared = p3McParticle;
+  tempStr.p_mc = p3McParticle;
+  tempStr.pid = pid;
+
+  PidMap::PID true_pid;
+  int mvd_pid = 0;
+  if (abs(tempStr.pid) == 211) {
+    true_pid = PidMap::PID::pion;
+    mvd_pid = 2;
+  } else if (abs(tempStr.pid) == 2212) {
+    true_pid = PidMap::PID::proton;
+    mvd_pid = 4;
+  } else if (abs(tempStr.pid) == 321) {
+    true_pid = PidMap::PID::kaon;
+    mvd_pid = 3;
+  } else if (abs(tempStr.pid) == 11) {
+    true_pid = PidMap::PID::electron;
+    mvd_pid = 0;
+  }
+
+  if (p3McParticle.Eta() > 3.5 || p3McParticle.Eta() < -3.5) {
+    tempStr.isDetected = false;
+    return tempStr;
+  }
+
+  eff = mvd_dp.GetEff(p3McParticle.Perp(), p3McParticle.PseudoRapidity(),
+                      mvd_pid);
+  double temp_rnd = MRndgen_eff.Uniform(0, 1);
+
+  if (temp_rnd > eff) {
+    tempStr.isDetected = false;
+    return tempStr;
+  } else {
+    tempStr.isDetected = true;
+  }
+
+  PidMap pidmap(true_pid, p3McParticle.PseudoRapidity(), p3McParticle.Mag());
+
+  double pidmap_temp[n_particle_type][n_det_type];
+
+  pidmap.GetPidMap(PidMap::ECCE_PID, &pidmap_temp[0][0]);
+
+  for (int iParticleType = 0; iParticleType < n_particle_type;
+       iParticleType++) {
+    for (int iDetType = 0; iDetType < n_particle_type; iDetType++) {
+      tempStr.n_sigma_pid_ecce[iParticleType][iDetType] =
+          pidmap_temp[iParticleType][iDetType];
+    }
+  }
+
+  pidmap.GetPidMap(PidMap::EICC_ACCEPTANCE, &pidmap_temp[0][0]);
+
+  for (int iParticleType = 0; iParticleType < n_particle_type;
+       iParticleType++) {
+    for (int iDetType = 0; iDetType < n_particle_type; iDetType++) {
+      tempStr.n_sigma_pid_eicc[iParticleType][iDetType] =
+          pidmap_temp[iParticleType][iDetType];
+    }
+  }
+
+  dca_smear(p3McParticle.X(), p3McParticle.Y(), p3McParticle.Z(),
+            v3McParticle.X(), v3McParticle.Y(), v3McParticle.Z(), mvd_pid,
+            &(tempStr.smeared_dcaz), &(tempStr.smeared_dcaxy), &rndgenXY,
+            &rndgenZ);
+  p_smear(&p3smeared, &rndgenP, mvd_pid);
+  tempStr.p_smeared = p3smeared;
+  return tempStr;
+}
+
+void SmearEvent::EventInput(erhic::EventMC *mcEvent, int index) {
+  detected_particles.clear();
+  num_final_particles = 0;
+  mc_event = mcEvent;
+
+  for (int iTrack = 2; iTrack < mcEvent->GetNTracks(); iTrack++) {
+    const erhic::ParticleMC *mcParticle = mcEvent->GetTrack(iTrack);
+    if (mcParticle->GetStatus() == 1 && mcParticle->GetEta() < 3.5 &&
+        mcParticle->GetEta() > -3.5 &&
+        (abs(mcParticle->id) == 11 || abs(mcParticle->id) == 211 ||
+         abs(mcParticle->id) == 321 || abs(mcParticle->id) == 2212) &&
+        mcParticle->GetIndex() != mcEvent->ScatteredLepton()->GetIndex()) {
+      SmearParticleStr detected_particle = SmearFunction(mcParticle);
+
+      if (detected_particle.isDetected) {
+        num_final_particles++;
+        detected_particles.push_back(detected_particle);
+      }
+    }
+  }
+
+  is_triggered = num_final_particles >= 2;
+  is_scattered_electron_detected = false;
+  int_is_scattered_electron_detected = 0;
+  smeared_px_scattered_lepton = smeared_py_scattered_lepton =
+      smeared_pz_scattered_lepton = 0.;
+  true_px_scattered_lepton = true_py_scattered_lepton =
+      true_pz_scattered_lepton = 0.;
+
+  if (is_triggered) {
+    double pseudorapidity_scattered_lepton =
+        mcEvent->ScatteredLepton()->Get4Vector().PseudoRapidity();
+
+    if (pseudorapidity_scattered_lepton > -3.5 &&
+        pseudorapidity_scattered_lepton < 3.5) {
+      SmearParticleStr scattered_lepton =
+          SmearFunction(mcEvent->ScatteredLepton());
+      if (scattered_lepton.isDetected) {
+        is_scattered_electron_detected = true;
+        int_is_scattered_electron_detected = 1;
+        smeared_px_scattered_lepton = scattered_lepton.p_smeared.X();
+        smeared_py_scattered_lepton = scattered_lepton.p_smeared.Y();
+        smeared_pz_scattered_lepton = scattered_lepton.p_smeared.Z();
+      }
+    }
+
+    true_px_scattered_lepton = mcEvent->ScatteredLepton()->Get4Vector().X();
+    true_py_scattered_lepton = mcEvent->ScatteredLepton()->Get4Vector().Y();
+    true_pz_scattered_lepton = mcEvent->ScatteredLepton()->Get4Vector().Z();
+
+    prime_vx = mvd_dp.GetRandomVx(is_scattered_electron_detected
+                                      ? detected_particles.size() + 1
+                                      : detected_particles.size());
+    prime_vy = mvd_dp.GetRandomVy(is_scattered_electron_detected
+                                      ? detected_particles.size() + 1
+                                      : detected_particles.size());
+    prime_vz = mvd_dp.GetRandomVz(is_scattered_electron_detected
+                                      ? detected_particles.size() + 1
+                                      : detected_particles.size());
+
+    for (int iDetectedParticle = 0; iDetectedParticle < num_final_particles;
+         iDetectedParticle++) {
+      true_px[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_mc.x();
+      true_py[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_mc.y();
+      true_pz[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_mc.z();
+
+      smeared_px[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_smeared.x();
+      smeared_py[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_smeared.y();
+      smeared_pz[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_smeared.z();
+
+      true_pid[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).pid;
+
+      smeared_dcaxy[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).smeared_dcaxy;
+      smeared_dcaz[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).smeared_dcaz;
+
+      for (int iParticleType = 0; iParticleType < n_particle_type;
+           iParticleType++) {
+        for (int iDetType = 0; iDetType < n_particle_type; iDetType++) {
+          n_sigma_pid_ecce[iDetectedParticle][iParticleType][iDetType] =
+              detected_particles.at(iDetectedParticle)
+                  .n_sigma_pid_ecce[iParticleType][iDetType];
+          n_sigma_pid_eicc[iDetectedParticle][iParticleType][iDetType] =
+              detected_particles.at(iDetectedParticle)
+                  .n_sigma_pid_eicc[iParticleType][iDetType];
+        }
+      }
+    }
+  }
+/*  */}
+
+void SmearEvent::GetEntry(long iEvent) {
+  tree_event->GetEntry(iEvent);
+  detected_particles.clear();
+  for (int iParticle = 0; iParticle < num_final_particles; iParticle++) {
+    SmearParticleStr detected_particle;
+    detected_particle.p_mc.SetXYZ(true_px[iParticle], true_py[iParticle],
+                                  true_pz[iParticle]);
+    detected_particle.p_smeared.SetXYZ(
+        smeared_px[iParticle], smeared_py[iParticle], smeared_pz[iParticle]);
+    detected_particle.isDetected = true;
+    detected_particle.smeared_dcaxy = smeared_dcaxy[iParticle];
+    detected_particle.smeared_dcaz = smeared_dcaz[iParticle];
+    detected_particle.pid = true_pid[iParticle];
+    for (int iParticleType = 0; iParticleType < n_particle_type;
+         iParticleType++) {
+      for (int iDetType = 0; iDetType < n_particle_type; iDetType++) {
+        detected_particle.n_sigma_pid_ecce[iParticleType][iDetType] =
+            n_sigma_pid_ecce[iParticle][iParticleType][iDetType];
+        detected_particle.n_sigma_pid_eicc[iParticleType][iDetType] =
+            n_sigma_pid_eicc[iParticle][iParticleType][iDetType];
+      }
+    }
+    detected_particles.push_back(detected_particle);
+  }
+  is_scattered_electron_detected =
+      int_is_scattered_electron_detected == 1 ? true : false;
+  c_pv = GetPV3();
+}
+
+void SmearEvent::Save() {
+  file_event->cd();
+  tree_event->Write();
+  file_event->Close();
+}
+
+bool SmearEvent::bool4Lambda_cCut(USED_PID_DET used_pid_det, double n_sigma,
+                                  int no1, int no2, int no3) {
+  bool to_return = true;
+  SmearParticleStr pionStr = detected_particles.at(no1);
+  SmearParticleStr kaonStr = detected_particles.at(no2);
+  SmearParticleStr protonStr = detected_particles.at(no3);
+  if (bool4LowMomentum(no1) && bool4LowMomentum(no2) && bool4LowMomentum(no3)) {
+    if ((pionStr.pid > 0 && kaonStr.pid < 0 && protonStr.pid > 0) ||
+        (pionStr.pid < 0 && kaonStr.pid > 0 && protonStr.pid < 0)) {
+      if (used_pid_det == ECCE_PID) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (abs(pionStr.n_sigma_pid_ecce[1][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+          if (abs(kaonStr.n_sigma_pid_ecce[2][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+          if (abs(protonStr.n_sigma_pid_ecce[3][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+        }
+      } else if (used_pid_det == ECCE_TOF_EMC) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (iDetType == 0 || iDetType == 2) {
+            if (abs(pionStr.n_sigma_pid_ecce[1][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+            if (abs(kaonStr.n_sigma_pid_ecce[2][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+            if (abs(protonStr.n_sigma_pid_ecce[3][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+          }
+        }
+      } else if (used_pid_det == ECCE_CHERENKOV_EMC) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (iDetType == 1 || iDetType == 2) {
+            if (abs(pionStr.n_sigma_pid_ecce[1][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+            if (abs(kaonStr.n_sigma_pid_ecce[2][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+            if (abs(protonStr.n_sigma_pid_ecce[3][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+          }
+        }
+      } else if (used_pid_det == EICC_ACCEPTANCE) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (abs(pionStr.n_sigma_pid_eicc[1][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+          if (abs(kaonStr.n_sigma_pid_eicc[2][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+          if (abs(protonStr.n_sigma_pid_eicc[3][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+        }
+      } else if (used_pid_det == PERFECT_PID) {
+        if ((pionStr.pid == 211 && kaonStr.pid == -321 &&
+             protonStr.pid == 2212) ||
+            (pionStr.pid == -211 && kaonStr.pid == 321 &&
+             protonStr.pid == -2212)) {
+          return true;
+        } else {
+          return false;
+        }
+      } else {
+        if ((pionStr.pid > 0 && kaonStr.pid < 0 && protonStr.pid > 0) ||
+            (pionStr.pid < 0 && kaonStr.pid > 0 && protonStr.pid < 0)) {
+          return true;
+        } else {
+          return false;
+        }
+      }
+    } else {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  return to_return;
+}
+
+bool SmearEvent::bool4D0Cut(SmearEvent::USED_PID_DET used_pid_det,
+                            double n_sigma, int no1, int no2) {
+  bool to_return = true;
+  SmearParticleStr pionStr = detected_particles.at(no1);
+  SmearParticleStr kaonStr = detected_particles.at(no2);
+  if (bool4LowMomentum(no1) && bool4LowMomentum(no2)) {
+    if (pionStr.pid * kaonStr.pid < 0) {
+      if (used_pid_det == ECCE_PID) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (abs(pionStr.n_sigma_pid_ecce[1][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+          if (abs(kaonStr.n_sigma_pid_ecce[2][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+        }
+      } else if (used_pid_det == ECCE_TOF_EMC) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (iDetType == 0 || iDetType == 2) {
+            if (abs(pionStr.n_sigma_pid_ecce[1][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+            if (abs(kaonStr.n_sigma_pid_ecce[2][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+          }
+        }
+      } else if (used_pid_det == ECCE_CHERENKOV_EMC) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (iDetType == 1 || iDetType == 2) {
+            if (abs(pionStr.n_sigma_pid_ecce[1][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+            if (abs(kaonStr.n_sigma_pid_ecce[2][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+          }
+        }
+      } else if (used_pid_det == EICC_ACCEPTANCE) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (abs(pionStr.n_sigma_pid_eicc[1][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+          if (abs(kaonStr.n_sigma_pid_eicc[2][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+        }
+      } else if (used_pid_det == PERFECT_PID) {
+        if ((pionStr.pid == 211 && kaonStr.pid == -321) ||
+            (pionStr.pid == -211 && kaonStr.pid == 321)) {
+          return true;
+        } else {
+          return false;
+        }
+      } else {
+        if (pionStr.pid * kaonStr.pid < 0) {
+          return true;
+        } else {
+          return false;
+        }
+      }
+    } else {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  return to_return;
+}
+
+bool SmearEvent::bool4LowMomentum(int no) {
+  SmearParticleStr particleStr = detected_particles.at(no);
+  if (abs(particleStr.pid) == 11) {
+    if (particleStr.p_mc.Mag() > 0.35) {
+      return true;
+    } else {
+      return false;
+    }
+  } else {
+    if (particleStr.p_mc.Mag() > 0.3) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+}
+
+bool SmearEvent::bool4JpsiCut(SmearEvent::USED_PID_DET used_pid_det,
+                              double n_sigma, int no1, int no2) {
+  // no1 electron no2 positron
+  bool to_return = true;
+  SmearParticleStr elecStr = detected_particles.at(no1);
+  SmearParticleStr posiStr = detected_particles.at(no2);
+  if (bool4LowMomentum(no1) && bool4LowMomentum(no2)) {
+
+    if (elecStr.pid > 0 && posiStr.pid < 0) {
+      if (used_pid_det == ECCE_PID) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (abs(elecStr.n_sigma_pid_ecce[0][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+          if (abs(posiStr.n_sigma_pid_ecce[0][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+        }
+      } else if (used_pid_det == ECCE_TOF_EMC) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (iDetType == 0 || iDetType == 2) {
+            if (abs(elecStr.n_sigma_pid_ecce[0][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+            if (abs(posiStr.n_sigma_pid_ecce[0][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+          }
+        }
+      } else if (used_pid_det == ECCE_CHERENKOV_EMC) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (iDetType == 1 || iDetType == 2) {
+            if (abs(elecStr.n_sigma_pid_ecce[0][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+            if (abs(posiStr.n_sigma_pid_ecce[0][iDetType]) > n_sigma) {
+              to_return = to_return && false;
+            }
+          }
+        }
+      } else if (used_pid_det == EICC_ACCEPTANCE) {
+        for (int iDetType = 0; iDetType < n_det_type; iDetType++) {
+          if (abs(elecStr.n_sigma_pid_eicc[0][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+          if (abs(posiStr.n_sigma_pid_eicc[0][iDetType]) > n_sigma) {
+            to_return = to_return && false;
+          }
+        }
+      } else if (used_pid_det == PERFECT_PID) {
+        if (elecStr.pid == 11 && posiStr.pid == -11) {
+          return true;
+        } else {
+          return false;
+        }
+      } else {
+        if (elecStr.pid > 0 && posiStr.pid < 0) {
+          return true;
+        } else {
+          return false;
+        }
+      }
+    } else {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  return to_return;
+}
+
+SmearEvent::CutStr_D0
+SmearEvent::CalCut_D0(int no1, int no2) // calculate cuts no1: pion, no2:kaon
+{
+  CutStr_D0 tempStr;
+  TVector3 p_D0;
+  TVector3 c_pion, c_kaon, c_D0_dec, c_D0_prod, path_D0;
+  SmearParticleStr pionStr = detected_particles.at(no1);
+  SmearParticleStr kaonStr = detected_particles.at(no2);
+
+  TLorentzVector p4_pion, p4_kaon;
+  TLorentzVector p4mc_pion, p4mc_kaon;
+
+  if (pionStr.pid > 0) {
+    tempStr.D0_Sign = 1;
+  } else {
+    tempStr.D0_Sign = -1;
+  }
+
+  p4_pion.SetVectM(pionStr.p_smeared, 0.13957);
+  p4_kaon.SetVectM(kaonStr.p_smeared, 0.49368);
+
+  p4mc_pion.SetVectM(pionStr.p_mc, 0.13957);
+  p4mc_kaon.SetVectM(kaonStr.p_mc, 0.49368);
+
+  tempStr.inv_mass = (p4_pion + p4_kaon).Mag();
+  tempStr.pT_D0 = (p4mc_pion + p4mc_kaon).Perp();
+  tempStr.rapidity_D0 = (p4mc_pion + p4mc_kaon).Rapidity();
+
+  coor_cal(pionStr.p_smeared, pionStr.smeared_dcaxy, pionStr.smeared_dcaz,
+           &c_pion);
+  coor_cal(kaonStr.p_smeared, kaonStr.smeared_dcaxy, kaonStr.smeared_dcaz,
+           &c_kaon);
+
+  tempStr.dca_pion = dca_cal(pionStr.p_smeared, c_pion, &c_pion, c_pv);
+  tempStr.dca_kaon = dca_cal(kaonStr.p_smeared, c_kaon, &c_kaon, c_pv);
+  c_D0_dec = c_pion + c_kaon;
+  c_D0_dec.SetXYZ(c_D0_dec.X() / 2., c_D0_dec.Y() / 2., c_D0_dec.Z() / 2.);
+  p_D0 = pionStr.p_smeared + kaonStr.p_smeared;
+
+  tempStr.dca_D02pv = dca_cal(p_D0, c_D0_dec, &c_D0_prod, c_pv);
+  path_D0 = c_D0_dec - c_pv;
+  tempStr.cos_theta = cos(p_D0.Angle(path_D0));
+
+  tempStr.decay_length_D0 = path_D0.Mag();
+
+  tempStr.p3_mc[0] = (p4_kaon + p4_pion).Px();
+  tempStr.p3_mc[1] = (p4_kaon + p4_pion).Py();
+  tempStr.p3_mc[2] = (p4_kaon + p4_pion).Pz();
+
+  tempStr.p3_elec[0] = true_px_scattered_lepton;
+  tempStr.p3_elec[1] = true_py_scattered_lepton;
+  tempStr.p3_elec[2] = true_pz_scattered_lepton;
+
+  return tempStr;
+}
+
+SmearEvent::CutStr_Jpsi
+SmearEvent::CalCut_Jpsi(int no1, int no2) // calculate cuts no1: pion, no2:kaon
+{
+  CutStr_Jpsi tempStr;
+  TVector3 p_Jpsi;
+  TVector3 c_elec, c_posi, c_Jpsi_dec, c_Jpsi_prod, path_Jpsi;
+  SmearParticleStr elecStr = detected_particles.at(no1);
+  SmearParticleStr posiStr = detected_particles.at(no2);
+
+  TLorentzVector p4_elec, p4_posi;
+  TLorentzVector p4mc_elec, p4mc_posi;
+
+  p4_elec.SetVectM(elecStr.p_smeared, 0.);
+  p4_posi.SetVectM(posiStr.p_smeared, 0.);
+
+  p4mc_elec.SetVectM(elecStr.p_mc, 0.);
+  p4mc_posi.SetVectM(posiStr.p_mc, 0.);
+
+  tempStr.inv_mass = (p4_elec + p4_posi).Mag();
+  tempStr.pT_Jpsi = (p4mc_elec + p4mc_posi).Perp();
+  tempStr.rapidity_Jpsi = (p4mc_elec + p4mc_posi).Rapidity();
+
+  coor_cal(elecStr.p_smeared, elecStr.smeared_dcaxy, elecStr.smeared_dcaz,
+           &c_elec);
+  coor_cal(posiStr.p_smeared, posiStr.smeared_dcaxy, posiStr.smeared_dcaz,
+           &c_posi);
+
+  tempStr.dca_electron = dca_cal(elecStr.p_smeared, c_elec, &c_elec, c_pv);
+  tempStr.dca_positron = dca_cal(posiStr.p_smeared, c_posi, &c_posi, c_pv);
+  c_Jpsi_dec = c_elec + c_posi;
+  c_Jpsi_dec.SetXYZ(c_Jpsi_dec.X() / 2., c_Jpsi_dec.Y() / 2.,
+                    c_Jpsi_dec.Z() / 2.);
+  p_Jpsi = elecStr.p_smeared + posiStr.p_smeared;
+
+  tempStr.dca_Jpsi2pv = dca_cal(p_Jpsi, c_Jpsi_dec, &c_Jpsi_prod, c_pv);
+  path_Jpsi = c_Jpsi_dec - c_pv;
+  tempStr.cos_theta = cos(p_Jpsi.Angle(path_Jpsi));
+
+  tempStr.decay_length_Jpsi = path_Jpsi.Mag();
+
+  tempStr.p3_mc[0] = (p4_posi + p4_elec).Px();
+  tempStr.p3_mc[1] = (p4_posi + p4_elec).Py();
+  tempStr.p3_mc[2] = (p4_posi + p4_elec).Pz();
+
+  tempStr.p3_elec[0] = true_px_scattered_lepton;
+  tempStr.p3_elec[1] = true_py_scattered_lepton;
+  tempStr.p3_elec[2] = true_pz_scattered_lepton;
+
+  return tempStr;
+}
+
+SmearEvent::CutStr_lambda_c SmearEvent::CalCut_Lambda_c(
+    int no1, int no2,
+    int no3) // calculate cuts no1: pion, no2:kaon, no3:proton
+{
+  CutStr_lambda_c tempStr;
+
+  TVector3 p_lambda_c;
+  TVector3 c_pion, c_kaon, c_proton, c_lambda_c_dec, c_lambda_c_prod,
+      path_lambda_c;
+  SmearParticleStr pionStr = detected_particles.at(no1);
+  SmearParticleStr kaonStr = detected_particles.at(no2);
+  SmearParticleStr protonStr = detected_particles.at(no3);
+
+  if (pionStr.pid > 0) {
+    tempStr.Lambda_c_Sign = 1;
+  } else {
+    tempStr.Lambda_c_Sign = -1;
+  }
+
+  TLorentzVector p4_pion, p4_kaon, p4_proton;
+  TLorentzVector p4mc_pion, p4mc_kaon, p4mc_proton;
+
+  p4_pion.SetVectM(pionStr.p_smeared, 0.13957);
+  p4_kaon.SetVectM(kaonStr.p_smeared, 0.49368);
+  p4_proton.SetVectM(protonStr.p_smeared, 0.93827);
+
+  p4mc_pion.SetVectM(pionStr.p_mc, 0.13957);
+  p4mc_kaon.SetVectM(kaonStr.p_mc, 0.49368);
+  p4mc_proton.SetVectM(protonStr.p_mc, 0.93827);
+
+  tempStr.inv_mass = (p4_pion + p4_kaon + p4_proton).Mag();
+  tempStr.pT_lambda_c = (p4mc_pion + p4mc_kaon + p4mc_proton).Perp();
+  tempStr.rapidity_lambda_c = (p4mc_pion + p4mc_kaon + p4mc_proton).Rapidity();
+
+  coor_cal(pionStr.p_smeared, pionStr.smeared_dcaxy, pionStr.smeared_dcaz,
+           &c_pion);
+  coor_cal(kaonStr.p_smeared, kaonStr.smeared_dcaxy, kaonStr.smeared_dcaz,
+           &c_kaon);
+  coor_cal(protonStr.p_smeared, protonStr.smeared_dcaxy, protonStr.smeared_dcaz,
+           &c_proton);
+
+  tempStr.dca_pion = dca_cal(pionStr.p_smeared, c_pion, &c_pion, c_pv);
+  tempStr.dca_kaon = dca_cal(kaonStr.p_smeared, c_kaon, &c_kaon, c_pv);
+  tempStr.dca_proton = dca_cal(protonStr.p_smeared, c_proton, &c_proton, c_pv);
+  c_lambda_c_dec = c_pion + c_kaon + c_proton;
+  c_lambda_c_dec.SetXYZ(c_lambda_c_dec.X() / 3., c_lambda_c_dec.Y() / 3.,
+                        c_lambda_c_dec.Z() / 3.);
+  p_lambda_c = pionStr.p_smeared + kaonStr.p_smeared + protonStr.p_smeared;
+
+  tempStr.dca_lambda_c2pv =
+      dca_cal(p_lambda_c, c_lambda_c_dec, &c_lambda_c_prod, c_pv);
+  path_lambda_c = c_lambda_c_dec - c_pv;
+  tempStr.cos_theta = cos(p_lambda_c.Angle(path_lambda_c));
+
+  tempStr.decay_length_lambda_c = path_lambda_c.Mag();
+
+  TVector3 c_temp;
+  double dca_daughters_pion_kaon = trackdca_cal(
+      pionStr.p_smeared, kaonStr.p_smeared, c_pion, c_kaon, &c_temp);
+  double dca_daughters_proton_kaon = trackdca_cal(
+      protonStr.p_smeared, kaonStr.p_smeared, c_proton, c_kaon, &c_temp);
+  double dca_daughters_proton_pion = trackdca_cal(
+      protonStr.p_smeared, pionStr.p_smeared, c_proton, c_pion, &c_temp);
+
+  tempStr.maxDca_daughters = dca_daughters_pion_kaon;
+  if (dca_daughters_proton_kaon > tempStr.maxDca_daughters) {
+    tempStr.maxDca_daughters = dca_daughters_proton_kaon;
+  }
+  if (dca_daughters_proton_pion > tempStr.maxDca_daughters) {
+    tempStr.maxDca_daughters = dca_daughters_proton_pion;
+  }
+
+  tempStr.p3_mc[0] = (p4_kaon + p4_pion + p4_proton).Px();
+  tempStr.p3_mc[1] = (p4_kaon + p4_pion + p4_proton).Py();
+  tempStr.p3_mc[2] = (p4_kaon + p4_pion + p4_proton).Pz();
+
+  tempStr.p3_elec[0] = true_px_scattered_lepton;
+  tempStr.p3_elec[1] = true_py_scattered_lepton;
+  tempStr.p3_elec[2] = true_pz_scattered_lepton;
+
+  return tempStr;
+}
+
+void SmearEvent::McEventInput(McEventStr mcEvent) {
+  detected_particles.clear();
+  num_final_particles = 3;
+
+  is_triggered = false;
+
+  SmearParticleStr pionStr =
+      SmearFunction(mcEvent.p3_pion, mcEvent.c3_pion, 211);
+  SmearParticleStr kaonStr =
+      SmearFunction(mcEvent.p3_kaon, mcEvent.c3_kaon, -321);
+  SmearParticleStr protonStr =
+      SmearFunction(mcEvent.p3_proton, mcEvent.c3_proton, 2212);
+
+  is_triggered =
+      pionStr.isDetected && kaonStr.isDetected && protonStr.isDetected;
+
+  if (is_triggered) {
+    detected_particles.push_back(pionStr);
+    detected_particles.push_back(kaonStr);
+    detected_particles.push_back(protonStr);
+
+    prime_vx = mvd_dp.GetRandomVx(7);
+    prime_vy = mvd_dp.GetRandomVy(7);
+    prime_vz = mvd_dp.GetRandomVz(7);
+
+    for (int iDetectedParticle = 0; iDetectedParticle < num_final_particles;
+         iDetectedParticle++) {
+      true_px[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_mc.x();
+      true_py[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_mc.y();
+      true_pz[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_mc.z();
+
+      smeared_px[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_smeared.x();
+      smeared_py[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_smeared.y();
+      smeared_pz[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).p_smeared.z();
+
+      true_pid[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).pid;
+      smeared_dcaxy[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).smeared_dcaxy;
+      smeared_dcaz[iDetectedParticle] =
+          detected_particles.at(iDetectedParticle).smeared_dcaz;
+      for (int iParticleType = 0; iParticleType < n_particle_type;
+           iParticleType++) {
+        for (int iDetType = 0; iDetType < n_particle_type; iDetType++) {
+          n_sigma_pid_ecce[iDetectedParticle][iParticleType][iDetType] =
+              detected_particles.at(iDetectedParticle)
+                  .n_sigma_pid_ecce[iParticleType][iDetType];
+          n_sigma_pid_eicc[iDetectedParticle][iParticleType][iDetType] =
+              detected_particles.at(iDetectedParticle)
+                  .n_sigma_pid_eicc[iParticleType][iDetType];
+        }
+      }
+    }
+  }
+}
