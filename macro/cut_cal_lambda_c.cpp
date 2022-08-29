@@ -45,7 +45,7 @@ void cut_cal(string name_input, int pid_system, string name_output,
     smear_event.GetEntry(iEvent);
 
     if (is_signal_cal != "all") {
-      if (is_signal ? !smear_event.isSignal(421) : smear_event.isSignal(4122))
+      if (is_signal ? !smear_event.isSignal(4122) : smear_event.isSignal(4122))
         continue;
     }
 
