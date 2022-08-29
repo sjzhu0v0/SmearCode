@@ -643,8 +643,6 @@ SmearEvent::CalCut_D0(int no1, int no2) // calculate cuts no1: pion, no2:kaon
     tempStr.D0_Sign = -1;
   }
 
-  tempStr.D0_Sign = pionStr.pid > 0 ?: 1, -1;
-
   p4_pion.SetVectM(pionStr.p_smeared, 0.13957);
   p4_kaon.SetVectM(kaonStr.p_smeared, 0.49368);
 
