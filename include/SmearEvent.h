@@ -157,6 +157,7 @@ public:
                         int no2, int no3);
   CutStr_D0 CalCut_D0(int no1, int no2);
   CutStr_Jpsi CalCut_Jpsi(int no1, int no2);
+  bool isSignal(int no);
 
   SmearParticleStr SmearFunction(const erhic::ParticleMC *mcParticle);
   SmearParticleStr SmearFunction(TVector3 p3McParticle, TVector3 v3McParticle,

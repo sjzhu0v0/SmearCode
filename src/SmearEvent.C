@@ -925,3 +925,13 @@ void SmearEvent::McEventInput(McEventStr mcEvent) {
     }
   }
 }
+
+bool SmearEvent::isSignal(int pid) {
+  tree_mcevent->GetEntry(event_id);
+  for (int iTrack = 0; iTrack < mc_event->GetNTracks(); iTrack++) {
+    const erhic::ParticleMC *mcParticle = mc_event->GetTrack(iTrack);
+    if (abs(mcParticle->id) == pid)
+      return true;
+  }
+  return false;
+}

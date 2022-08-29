@@ -1,7 +1,12 @@
 #include "SmearEvent.h"
 
 void cut_cal(string name_input, int pid_system, string name_output,
-             string name_mcinput) {
+             string name_mcinput, string is_signal_cal) {
+  bool is_signal = false;
+  if (is_signal_cal == "Signal") {
+    is_signal = true;
+  }
+
   SmearEvent::CutStr_lambda_c cutstr_lambda_c;
   TFile *f_mc = new TFile(name_mcinput.c_str());
   SmearEvent smear_event(true, name_input);
@@ -38,13 +43,18 @@ void cut_cal(string name_input, int pid_system, string name_output,
 
   for (long iEvent = 0; iEvent < smear_event.GetEntries(); iEvent++) {
     smear_event.GetEntry(iEvent);
+
+    if (is_signal_cal != "all") {
+      if (is_signal ? !smear_event.isSignal(421) : smear_event.isSignal(4122))
+        continue;
+    }
+
     int temp_var2 = smear_event.num_final_particles;
     for (int iPion = 0; iPion < smear_event.num_final_particles; iPion++) {
       for (int iKaon = 0; iKaon < smear_event.num_final_particles; iKaon++) {
         for (int iProton = 0; iProton < smear_event.num_final_particles;
              iProton++) {
-          if (iPion == iKaon || iPion == iProton || iKaon == iProton)
-            continue;
+          if (iPion == iKaon || iPion == iProton || iKaon == iProton) continue;
           if (pid_system == 0) {
             right_signs = smear_event.bool4Lambda_cCut(SmearEvent::ECCE_PID, 2.,
                                                        iPion, iKaon, iProton);
@@ -80,7 +90,7 @@ void cut_cal(string name_input, int pid_system, string name_output,
 
 int main(int argc, char *argv[]) {
   const string name_input = argv[1];
-  cut_cal(argv[1], atoi(argv[2]), argv[3], argv[4]);
+  cut_cal(argv[1], atoi(argv[2]), argv[3], argv[4], argv[5]);
   // cut_cal("~/HIUser_sjzhu/work3/code/Smear_Code/bin/lambda_c_decay_test.root",
   //         3, "cut_lambda_c_test.root",
   //         "/ustcfs/HICUser/ephy/work/sjzhu/Singularity-master/cvmfs/work/"
